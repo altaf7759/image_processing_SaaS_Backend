@@ -1,0 +1,226 @@
+-- EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS citext;   -- case-insensitive email
+
+-- ENUM TYPES
+CREATE TYPE user_role AS ENUM (
+  'admin',
+  'user'
+);
+
+CREATE TYPE subscription_status AS ENUM (
+  'active',
+  'cancelled',
+  'expired'
+);
+
+CREATE TYPE batch_status AS ENUM (
+  'processing',
+  'completed',
+  'partial_failed',
+  'failed'
+);
+
+CREATE TYPE job_status AS ENUM (
+  'queued',
+  'processing',
+  'retrying',
+  'completed',
+  'failed'
+);
+
+CREATE TYPE email_status AS ENUM (
+  'sent',
+  'failed'
+);
+
+CREATE TYPE transaction_status AS ENUM (
+  'pending',
+  'completed',
+  'failed'
+);
+
+-- UPDATED_AT TRIGGER FUNCTION
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- USERS
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  email CITEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role user_role NOT NULL DEFAULT 'user',
+  is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_users_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- PLANS
+CREATE TABLE plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL UNIQUE,
+  daily_jobs_limit INTEGER NOT NULL CHECK (daily_jobs_limit >= 0),
+  max_file_size_mb INTEGER NOT NULL CHECK (max_file_size_mb > 0),
+  priority_level INTEGER NOT NULL CHECK (priority_level >= 1),
+  storage_limit_mb INTEGER NOT NULL CHECK (storage_limit_mb >= 0),
+  watermark_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_plans_updated_at
+BEFORE UPDATE ON plans
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- SUBSCRIPTIONS
+CREATE TABLE subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+  status subscription_status NOT NULL DEFAULT 'active',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (expires_at > started_at)
+);
+
+CREATE TRIGGER trg_subscriptions_updated_at
+BEFORE UPDATE ON subscriptions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+-- Only one active subscription per user
+CREATE UNIQUE INDEX uq_subscriptions_one_active_per_user
+ON subscriptions(user_id)
+WHERE status = 'active';
+
+CREATE INDEX idx_subscriptions_user_id
+ON subscriptions(user_id);
+
+CREATE INDEX idx_subscriptions_plan_id
+ON subscriptions(plan_id);
+
+-- IMAGE_BATCHES
+CREATE TABLE image_batches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  original_file_url TEXT NOT NULL,
+  original_file_name VARCHAR(255) NOT NULL,
+  status batch_status NOT NULL DEFAULT 'processing',
+  total_jobs INTEGER NOT NULL CHECK (total_jobs > 0),
+  completed_jobs INTEGER NOT NULL DEFAULT 0 CHECK (completed_jobs >= 0),
+  failed_jobs INTEGER NOT NULL DEFAULT 0 CHECK (failed_jobs >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (completed_jobs + failed_jobs <= total_jobs)
+);
+
+CREATE INDEX idx_image_batches_user_created
+ON image_batches(user_id, created_at DESC);
+
+CREATE INDEX idx_image_batches_status
+ON image_batches(status);
+
+-- IMAGE_JOBS
+CREATE TABLE image_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  batch_id UUID NOT NULL REFERENCES image_batches(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  status job_status NOT NULL DEFAULT 'queued',
+  priority INTEGER NOT NULL CHECK (priority >= 1),
+  output_url TEXT,
+  output_size_kb INTEGER CHECK (output_size_kb >= 0),
+  width INTEGER CHECK (width > 0),
+  height INTEGER CHECK (height > 0),
+  format VARCHAR(20),
+  processing_time_ms INTEGER CHECK (processing_time_ms >= 0),
+  error_message TEXT,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  CHECK (
+    completed_at IS NULL
+    OR started_at IS NULL
+    OR completed_at >= started_at
+  )
+);
+
+CREATE INDEX idx_image_jobs_batch_id
+ON image_jobs(batch_id);
+
+CREATE INDEX idx_image_jobs_status
+ON image_jobs(status);
+
+CREATE INDEX idx_image_jobs_priority
+ON image_jobs(priority);
+
+-- USAGE_LOGS
+CREATE TABLE usage_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date DATE NOT NULL ,
+  jobs_used INTEGER NOT NULL DEFAULT 0 CHECK (jobs_used >= 0),
+  storage_used_mb INTEGER NOT NULL DEFAULT 0 CHECK (storage_used_mb >= 0),
+  api_requests INTEGER NOT NULL DEFAULT 0 CHECK (api_requests >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, date)
+);
+
+CREATE INDEX idx_usage_logs_user_date
+ON usage_logs(user_id, date DESC);
+
+-- EMAIL_LOGS
+CREATE TABLE email_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  type VARCHAR(50) NOT NULL,
+  recipient_email CITEXT NOT NULL,
+  status email_status NOT NULL DEFAULT 'sent',
+  provider_message_id VARCHAR(255),
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_email_logs_user_id
+ON email_logs(user_id);
+
+CREATE INDEX idx_email_logs_sent_at
+ON email_logs(sent_at DESC);
+
+-- BILLING_TRANSACTIONS
+CREATE TABLE billing_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+  amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
+  currency VARCHAR(10) NOT NULL,
+  status transaction_status NOT NULL DEFAULT 'pending',
+  external_reference VARCHAR(255),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TRIGGER trg_billing_transactions_updated_at
+BEFORE UPDATE ON billing_transactions
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE INDEX idx_billing_transactions_user_id
+ON billing_transactions(user_id);
+
+CREATE INDEX idx_billing_transactions_status
+ON billing_transactions(status);
