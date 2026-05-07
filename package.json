@@ -1,0 +1,20 @@
+{
+  "name": "image_processing_app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Built subscription-based image asset pipeline using BullMQ for distributed job orchestration and Worker Threads for CPU-intensive Sharp processing.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js"
+  },
+  "author": "Altaf Raja",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

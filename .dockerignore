@@ -1,0 +1,20 @@
+# Don't copy local dependencies (Docker will run npm install itself)
+node_modules
+
+# Don't copy logs or build artifacts from your host machine
+npm-debug.log
+dist
+build
+
+# Don't copy git history (makes the image heavy)
+.git
+.gitignore
+
+# Don't copy secrets (Best practice: pass these via 'env_file' in docker-compose)
+.env
+.env.local
+
+# Don't copy Docker's own configuration
+Dockerfile
+docker-compose.yml
+.dockerignore
