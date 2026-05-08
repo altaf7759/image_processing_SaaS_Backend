@@ -57,7 +57,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   role user_role NOT NULL DEFAULT 'user',
   is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-  timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
+  timezone VARCHAR(50) DEFAULT 'UTC',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
