@@ -5,6 +5,7 @@ export function GlobalErrorHandler(err, req, res, next) {
       const message = err.message || "Internal Server Error";
 
       console.error(`[ERROR] ${message}`);
+      console.error(err.stack);
 
       res.status(statusCode).json({
             success: false,
