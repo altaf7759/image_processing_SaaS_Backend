@@ -1,8 +1,6 @@
--- EXTENSIONS
-CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS citext;   -- case-insensitive email
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
 
--- ENUM TYPES
 CREATE TYPE user_role AS ENUM (
   'admin',
   'user'
@@ -10,8 +8,14 @@ CREATE TYPE user_role AS ENUM (
 
 CREATE TYPE subscription_status AS ENUM (
   'active',
-  'cancelled',
+  'scheduled_cancel',
   'expired'
+);
+
+CREATE TYPE billing_interval AS ENUM (
+  'monthly',
+  'quarterly',
+  'yearly'
 );
 
 CREATE TYPE batch_status AS ENUM (
@@ -40,7 +44,6 @@ CREATE TYPE transaction_status AS ENUM (
   'failed'
 );
 
--- UPDATED_AT TRIGGER FUNCTION
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -49,7 +52,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- USERS
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(255) NOT NULL,
@@ -57,7 +59,7 @@ CREATE TABLE users (
   password_hash TEXT NOT NULL,
   role user_role NOT NULL DEFAULT 'user',
   is_verified BOOLEAN NOT NULL DEFAULT FALSE,
-  timezone VARCHAR(50) DEFAULT 'UTC',
+  timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -67,16 +69,15 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
--- PLANS
 CREATE TABLE plans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(50) NOT NULL UNIQUE, -- Free / Pro / Business
+  is_free BOOLEAN NOT NULL DEFAULT FALSE,
   daily_jobs_limit INTEGER NOT NULL CHECK (daily_jobs_limit >= 0),
   max_file_size_mb INTEGER NOT NULL CHECK (max_file_size_mb > 0),
   priority_level INTEGER NOT NULL CHECK (priority_level >= 1),
   storage_limit_mb INTEGER NOT NULL CHECK (storage_limit_mb >= 0),
   watermark_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-  price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -87,18 +88,50 @@ BEFORE UPDATE ON plans
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
--- SUBSCRIPTIONS
+CREATE TABLE plan_prices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_id UUID NOT NULL
+    REFERENCES plans(id)
+    ON DELETE CASCADE,
+  interval billing_interval NOT NULL,
+  duration_months INTEGER NOT NULL CHECK (duration_months > 0),
+  price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
+  currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(plan_id, interval)
+);
+
+CREATE INDEX idx_plan_prices_plan_id
+ON plan_prices(plan_id);
+
 CREATE TABLE subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+  plan_id UUID NOT NULL
+    REFERENCES plans(id)
+    ON DELETE RESTRICT,
+  plan_price_id UUID
+    REFERENCES plan_prices(id)
+    ON DELETE RESTRICT,
   status subscription_status NOT NULL DEFAULT 'active',
   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ,
   auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
+  cancelled_at TIMESTAMPTZ,
+  source VARCHAR(30) NOT NULL DEFAULT 'manual',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (expires_at > started_at)
+  CHECK (
+    expires_at IS NULL
+    OR expires_at > started_at
+  ),
+  CHECK (
+    cancelled_at IS NULL
+    OR cancelled_at >= started_at
+  )
 );
 
 CREATE TRIGGER trg_subscriptions_updated_at
@@ -106,7 +139,7 @@ BEFORE UPDATE ON subscriptions
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
--- Only one active subscription per user
+-- one active subscription per user
 CREATE UNIQUE INDEX uq_subscriptions_one_active_per_user
 ON subscriptions(user_id)
 WHERE status = 'active';
@@ -114,21 +147,26 @@ WHERE status = 'active';
 CREATE INDEX idx_subscriptions_user_id
 ON subscriptions(user_id);
 
-CREATE INDEX idx_subscriptions_plan_id
-ON subscriptions(plan_id);
+CREATE INDEX idx_subscriptions_expiry
+ON subscriptions(expires_at);
 
--- IMAGE_BATCHES
 CREATE TABLE image_batches (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
   original_file_url TEXT NOT NULL,
   original_file_name VARCHAR(255) NOT NULL,
   status batch_status NOT NULL DEFAULT 'processing',
   total_jobs INTEGER NOT NULL CHECK (total_jobs > 0),
-  completed_jobs INTEGER NOT NULL DEFAULT 0 CHECK (completed_jobs >= 0),
-  failed_jobs INTEGER NOT NULL DEFAULT 0 CHECK (failed_jobs >= 0),
+  completed_jobs INTEGER NOT NULL DEFAULT 0
+    CHECK (completed_jobs >= 0),
+  failed_jobs INTEGER NOT NULL DEFAULT 0
+    CHECK (failed_jobs >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (completed_jobs + failed_jobs <= total_jobs)
+  CHECK (
+    completed_jobs + failed_jobs <= total_jobs
+  )
 );
 
 CREATE INDEX idx_image_batches_user_created
@@ -137,10 +175,12 @@ ON image_batches(user_id, created_at DESC);
 CREATE INDEX idx_image_batches_status
 ON image_batches(status);
 
--- IMAGE_JOBS
+
 CREATE TABLE image_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  batch_id UUID NOT NULL REFERENCES image_batches(id) ON DELETE CASCADE,
+  batch_id UUID NOT NULL
+    REFERENCES image_batches(id)
+    ON DELETE CASCADE,
   type VARCHAR(50) NOT NULL,
   status job_status NOT NULL DEFAULT 'queued',
   priority INTEGER NOT NULL CHECK (priority >= 1),
@@ -169,14 +209,18 @@ ON image_jobs(status);
 CREATE INDEX idx_image_jobs_priority
 ON image_jobs(priority);
 
--- USAGE_LOGS
 CREATE TABLE usage_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  date DATE NOT NULL ,
-  jobs_used INTEGER NOT NULL DEFAULT 0 CHECK (jobs_used >= 0),
-  storage_used_mb INTEGER NOT NULL DEFAULT 0 CHECK (storage_used_mb >= 0),
-  api_requests INTEGER NOT NULL DEFAULT 0 CHECK (api_requests >= 0),
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+  date DATE NOT NULL,
+  jobs_used INTEGER NOT NULL DEFAULT 0
+    CHECK (jobs_used >= 0),
+  storage_used_mb INTEGER NOT NULL DEFAULT 0
+    CHECK (storage_used_mb >= 0),
+  api_requests INTEGER NOT NULL DEFAULT 0
+    CHECK (api_requests >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, date)
 );
@@ -184,10 +228,11 @@ CREATE TABLE usage_logs (
 CREATE INDEX idx_usage_logs_user_date
 ON usage_logs(user_id, date DESC);
 
--- EMAIL_LOGS
 CREATE TABLE email_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  user_id UUID
+    REFERENCES users(id)
+    ON DELETE SET NULL,
   type VARCHAR(50) NOT NULL,
   recipient_email CITEXT NOT NULL,
   status email_status NOT NULL DEFAULT 'sent',
@@ -201,13 +246,19 @@ ON email_logs(user_id);
 CREATE INDEX idx_email_logs_sent_at
 ON email_logs(sent_at DESC);
 
--- BILLING_TRANSACTIONS
 CREATE TABLE billing_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  plan_id UUID NOT NULL REFERENCES plans(id) ON DELETE RESTRICT,
+  user_id UUID NOT NULL
+    REFERENCES users(id)
+    ON DELETE CASCADE,
+  plan_id UUID NOT NULL
+    REFERENCES plans(id)
+    ON DELETE RESTRICT,
+  plan_price_id UUID
+    REFERENCES plan_prices(id)
+    ON DELETE RESTRICT,
   amount NUMERIC(10,2) NOT NULL CHECK (amount >= 0),
-  currency VARCHAR(10) NOT NULL,
+  currency VARCHAR(10) NOT NULL DEFAULT 'INR',
   status transaction_status NOT NULL DEFAULT 'pending',
   external_reference VARCHAR(255),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
