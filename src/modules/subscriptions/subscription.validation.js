@@ -1,5 +1,5 @@
 import z from "zod";
-import AppError from "../../utils/appError.js";
+import AppError from "../../utils/AppError.js";
 
 export const subscriptionSchema = z.object({
       plan_id: z.string().uuid("Invalid plan price ID format"),

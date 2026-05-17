@@ -1,3 +1,7 @@
+-- CREATE DATABASE image_processing;
+
+-- \c image_processing;
+
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
 
@@ -155,11 +159,11 @@ CREATE TABLE image_batches (
   user_id UUID NOT NULL
     REFERENCES users(id)
     ON DELETE CASCADE,
-  original_file_url TEXT NOT NULL,
+  r2_key TEXT NOT NULL,
   original_file_name VARCHAR(255) NOT NULL,
   status batch_status NOT NULL DEFAULT 'processing',
   total_jobs INTEGER NOT NULL CHECK (total_jobs > 0),
-  completed_jobs INTEGER NOT NULL DEFAULT 0
+  completed_jobs INTEGER NOT NULL DEFAULT 0,
     CHECK (completed_jobs >= 0),
   failed_jobs INTEGER NOT NULL DEFAULT 0
     CHECK (failed_jobs >= 0),
@@ -181,6 +185,7 @@ CREATE TABLE image_jobs (
   batch_id UUID NOT NULL
     REFERENCES image_batches(id)
     ON DELETE CASCADE,
+  bullmq_id VARCHAR(255) NOT NULL UNIQUE,
   type VARCHAR(50) NOT NULL,
   status job_status NOT NULL DEFAULT 'queued',
   priority INTEGER NOT NULL CHECK (priority >= 1),
@@ -189,6 +194,8 @@ CREATE TABLE image_jobs (
   width INTEGER CHECK (width > 0),
   height INTEGER CHECK (height > 0),
   format VARCHAR(20),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_retry_at TIMESTAMPTZ,
   processing_time_ms INTEGER CHECK (processing_time_ms >= 0),
   error_message TEXT,
   started_at TIMESTAMPTZ,
@@ -199,6 +206,9 @@ CREATE TABLE image_jobs (
     OR completed_at >= started_at
   )
 );
+
+CREATE INDEX idx_image_jobs_batch_status
+ON image_jobs(batch_id, status);
 
 CREATE INDEX idx_image_jobs_batch_id
 ON image_jobs(batch_id);

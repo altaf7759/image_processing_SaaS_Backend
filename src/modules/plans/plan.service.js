@@ -1,5 +1,5 @@
 import { Plan } from '../../models/plan.models.js';
-import AppError from '../../utils/appError.js';
+import AppError from '../../utils/AppError.js';
 import { createPlan } from './plan.repository.js';
 
 export const processCreatePlan = async (planData) => {

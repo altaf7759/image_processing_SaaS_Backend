@@ -1,7 +1,7 @@
 import pool from "../../config/db.js";
 import { Plan } from "../../models/plan.models.js";
 import { Subscription } from "../../models/subscription.model.js";
-import AppError from "../../utils/appError.js";
+import AppError from "../../utils/AppError.js";
 import { createBillingTransaction, createSubscription } from "./subscription.repository.js";
 
 export const processSubscription = async (userId, planPriceId, autoRenew) => {

@@ -1,4 +1,4 @@
-import AppError from '../utils/appError.js';
+import AppError from '../utils/AppError.js';
 import { verifyToken } from '../utils/jwt.js';
 
 export const validateToken = (req, res, next) => {
