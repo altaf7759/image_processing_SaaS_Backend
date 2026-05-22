@@ -30,5 +30,21 @@ export const Plan = {
 
             const result = await client.query(query, [planId]);
             return result.rows;
+      },
+
+      getPlanIdAndPlanPriceIdForFreePlan: async () => {
+            const query = `
+                  SELECT
+                        p.id, AS plan_id
+                        pp.id AS price_id
+                  FROM plans AS p
+                  LEFT JOIN plan_prices AS pp
+                        ON pp.plan_id = p.id
+                  WHERE p.name = "Free"
+                  AND is_active = TRUE
+                  LIMIT 1
+            `
+            const result = await pool.query(query)
+            return result.rows[0]
       }
 }

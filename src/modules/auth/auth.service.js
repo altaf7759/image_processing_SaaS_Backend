@@ -3,6 +3,8 @@ import { createUser } from './auth.repository.js';
 import { User } from '../../models/user.models.js';
 import AppError from '../../utils/AppError.js';
 import { signToken } from '../../utils/jwt.js';
+import { Plan } from '../../models/plan.models.js';
+import { createSubscription } from '../subscriptions/subscription.repository.js';
 
 export const processUserRegistration = async (userData) => {
 
@@ -17,10 +19,21 @@ export const processUserRegistration = async (userData) => {
 
       const { password, ...otherData } = userData;
 
-      return await createUser({
+      const user = await createUser({
             ...otherData,
             password_hash: hash
       });
+
+      const { plan_id, price_id } = await Plan.getPlanIdAndPlanPriceIdForFreePlan()
+
+      const subscription = await createSubscription({
+            user_id: user.id,
+            plan_id,
+            plan_price_id: price_id,
+            source: "sign_up_free_auto"
+      })
+
+      return { user, subscription }
 };
 
 export const processLoginUser = async ({ email, password }) => {

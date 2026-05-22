@@ -7,7 +7,7 @@ import AppError from "../utils/AppError.js";
 
 export const s3 = new S3Client({
       region: "auto",
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/image-processing-app`,
+      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: {
             accessKeyId: process.env.R2_ACCESS_KEY_ID,
             secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
@@ -23,9 +23,10 @@ const storage = multerS3({
             const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
             const extension = path.extname(file.originalname);
 
-            const folder = "uploads";
+            const folder = `users/${req.user.id}/originals`;
 
             const fileName = `${folder}/${uniqueSuffix}${extension}`;
+
             cb(null, fileName);
       }
 });
@@ -43,6 +44,6 @@ export const upload = multer({
       storage: storage,
       fileFilter: fileFilter,
       limits: {
-            fileSize: LIMITS.MAX_FILE_SIZE_FREE
+            fileSize: LIMITS.MAX_FILE_SIZE
       }
 });

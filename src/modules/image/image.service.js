@@ -1,70 +1,192 @@
-import { getR2SignedUrl, deleteR2Object } from "../../utils/r2.js";
+import {
+      getR2SignedUrl,
+      deleteR2Object
+} from "../../utils/r2.js";
+
+import { deleteImageBatch } from "./image.repository.js";
 import { imageQueue } from "../../queues/image.queue.js";
+
 import pool from "../../config/db.js";
+
 import AppError from "../../utils/AppError.js";
 
-export const addImageToQueue = async (req) => {
-      const { totalJobs, targets } = req.body;
-      const userId = req.user.id;
-      const r2Key = req.file.key;
-      const originalFileName = req.file.originalname;
+import {
+      createImageBatch,
+      createJobRow,
+      increaseStorageUsed
+} from "./image.repository.js";
 
-      const signedUrl = await getR2SignedUrl(r2Key);
-      if (!signedUrl) {
+export const addImageToQueue = async (req) => {
+
+      const {
+            totalJobs,
+            targets
+      } = req.body;
+
+      const userId = req.user.id;
+
+      const r2Key = req.file.key;
+
+      const originalFileName =
+            req.file.originalname;
+
+      const {
+            max_file_size_bytes,
+            storage_limit_bytes,
+            storage_used_bytes,
+      } = req.user.subscription;
+
+      if (
+            Number(req.file.size) >
+            Number(max_file_size_bytes)
+      ) {
+
             await deleteR2Object(r2Key);
-            throw new AppError("Failed to generate signed URL.", 500);
+
+            throw new AppError(
+                  "File exceeds plan limit",
+                  403
+            );
       }
+
+      const projectedStorage =
+            Number(storage_used_bytes) +
+            Number(req.file.size);
+      console.log(projectedStorage, storage_limit_bytes)
+
+      if (
+            Number(projectedStorage) >
+            Number(storage_limit_bytes)
+      ) {
+
+            await deleteR2Object(r2Key);
+
+            throw new AppError(
+                  "Storage quota exceeded",
+                  403
+            );
+      }
+
+      const signedUrl =
+            await getR2SignedUrl(r2Key);
+
+      if (!signedUrl) {
+
+            await deleteR2Object(r2Key);
+
+            throw new AppError(
+                  "Failed to generate signed URL.",
+                  500
+            );
+      }
+
+      const client =
+            await pool.connect();
 
       let createdBatchId = null;
 
       try {
-            const batchQuery = `
-                  INSERT INTO image_batches (user_id, r2_key, original_file_name, total_jobs, status)
-                  VALUES ($1, $2, $3, $4, 'processing'::batch_status)
-                  RETURNING id;
-            `;
-            const batchResult = await pool.query(batchQuery, [userId, r2Key, originalFileName, totalJobs]);
-            createdBatchId = batchResult.rows[0].id;
+
+            await client.query("BEGIN");
+
+            const batch =
+                  await createImageBatch(
+                        {
+                              userId,
+                              r2Key,
+                              totalJobs,
+                              originalFileName
+                        },
+                        client
+                  );
+
+            createdBatchId = batch.id;
 
             const addedJobs = [];
 
             for (const target of targets) {
-                  const customBullMqId = `job_${createdBatchId}_${target}_${Date.now()}`;
 
-                  const jobQuery = `
-                        INSERT INTO image_jobs (batch_id, bullmq_id, type, priority, status)
-                        VALUES ($1, $2, $3, $4, 'queued'::job_status)
-                        RETURNING id;
-                  `;
+                  const customBullMqId =
+                        `job_${createdBatchId}_${target}_${Date.now()}`;
 
-                  const jobResult = await pool.query(jobQuery, [createdBatchId, customBullMqId, target, 1]);
-                  const imageJobRecordId = jobResult.rows[0].id;
+                  const jobRow =
+                        await createJobRow(
+                              {
+                                    batchId:
+                                          createdBatchId,
 
-                  const job = await imageQueue.add(
+                                    bullmqId:
+                                          customBullMqId,
+
+                                    type: target,
+
+                                    priority: 1
+                              },
+                              client
+                        );
+
+                  addedJobs.push({
+                        target,
+                        bullMqId:
+                              customBullMqId,
+                        jobRecordId:
+                              jobRow.id
+                  });
+            }
+
+            await increaseStorageUsed(
+                  {
+                        userId,
+                        bytes:
+                              req.file.size
+                  },
+                  client
+            );
+
+            await client.query("COMMIT");
+
+            for (const job of addedJobs) {
+
+                  await imageQueue.add(
                         "image",
                         {
-                              batchId: createdBatchId,
-                              jobRecordId: imageJobRecordId,
+                              batchId:
+                                    createdBatchId,
+
+                              jobRecordId:
+                                    job.jobRecordId,
+
                               userId,
+
                               signedUrl,
-                              target,
+
+                              target:
+                                    job.target,
                         },
                         {
-                              jobId: customBullMqId,
+                              jobId:
+                                    job.bullMqId,
+
                               attempts: 3,
-                              backoff: { type: "exponential", delay: 1000 },
+
+                              backoff: {
+                                    type:
+                                          "exponential",
+
+                                    delay: 1000,
+                              },
+
                               removeOnComplete: {
                                     age: 3600,
                                     count: 100,
                               },
+
                               removeOnFail: {
                                     age: 86400,
                                     count: 50,
                               }
                         }
                   );
-
-                  addedJobs.push({ target, bullMqId: job.id });
             }
 
             return {
@@ -75,12 +197,27 @@ export const addImageToQueue = async (req) => {
             };
 
       } catch (error) {
+
+            await client.query(
+                  "ROLLBACK"
+            );
+
             await deleteR2Object(r2Key);
 
             if (createdBatchId) {
-                  await pool.query("DELETE FROM image_batches WHERE id = $1", [createdBatchId]);
+
+                  await deleteImageBatch(
+                        createdBatchId
+                  );
             }
 
-            throw new AppError(`Failed to process image request: ${error.message}`, 500);
+            throw new AppError(
+                  `Failed to process image request: ${error.message}`,
+                  500
+            );
+
+      } finally {
+
+            client.release();
       }
 };

@@ -10,13 +10,23 @@ import {
       incrementBatchCompleted,
       markJobFailed,
       incrementBatchFailed,
+      markJobStarted
 } from "../models/image.model.js";
+import { upsertUsageLog } from "../models/usage.model.js";
+import { increaseStorageUsed } from "../modules/image/image.repository.js";
+import { checkAndCompleteBatch } from "../models/sse.model.js";
 
 const worker = new Worker(
       "image",
       async (job) => {
-            const jobId = job.id;
-            const batchId = jobId.split('_')[1];
+            // Safely update retry state inside the processor context prior to running heavy logic
+            if (job.attemptsMade > 0) {
+                  try {
+                        await markJobRetrying(job.id, job.attemptsMade);
+                  } catch (err) {
+                        console.error(`Database error updating job retry state for ${job.id}:`, err.message);
+                  }
+            }
 
             return new Promise((resolve, reject) => {
                   const thread = new ThreadWorker(
@@ -41,7 +51,6 @@ const worker = new Worker(
                   });
 
                   thread.on("error", (err) => reject(err));
-
                   thread.on("exit", (code) => {
                         if (code !== 0) {
                               reject(new Error(`Worker thread stopped unexpectedly with exit code ${code}`));
@@ -53,19 +62,19 @@ const worker = new Worker(
                   });
             });
       },
-      {
-            connection: redisClient,
-            concurrency: 4
-      }
+      { connection: redisClient, concurrency: 4 }
 );
 
+// Lightweight clean logging hooks
 worker.on("active", async (job) => {
-      if (job.attemptsMade > 0) {
-            try {
-                  await markJobRetrying(job.id, job.attemptsMade);
-            } catch (err) {
-                  console.error("Database error updating job retry state:", err);
-            }
+      try {
+            await markJobStarted(job.id);
+
+            console.log(
+                  `[BullMQ] Job ${job.id} is now active`
+            );
+      } catch (err) {
+            console.error(err);
       }
 });
 
@@ -73,27 +82,55 @@ worker.on("completed", async (job, result) => {
       console.log(`[BullMQ] Job ${job.id} completed successfully`);
       const batchId = job.id.split('_')[1];
       const fileName = result?.fileName;
+      const fileSize = result?.fileSize || 0;
 
       try {
-            await markJobCompleted(job.id, fileName);
+            // 1. Commit job resolution states
+            await markJobCompleted({
+                  bullmqId: job.id,
+                  outputUrl: result.fileName,
+                  outputSizeBytes: result.fileSize,
+                  width: result.width,
+                  height: result.height,
+                  format: result.format,
+                  processingTimeMs: result.processingTimeMs,
+            });
             await incrementBatchCompleted(batchId);
+
+            // 2. Adjust user billing/snapshots safely
+            const updatedSubscription = await increaseStorageUsed({ userId: job.data.userId, bytes: fileSize });
+            await upsertUsageLog({ userId: job.data.userId, storageSnapshotBytes: updatedSubscription });
+
+            // 3. Atomically check if the macro-batch is completed
+            await checkAndCompleteBatch(batchId);
       } catch (err) {
-            console.error(`Database commit failure on job completion hook for ${job.id}:`, err);
+            console.error(`Database update failure on job completion lifecycle for ${job.id}:`, err);
       }
 });
 
 worker.on("failed", async (job, err) => {
-      console.error(`[BullMQ] Job ${job?.id} failed:`, err.message);
+      console.error(`[BullMQ] Job ${job?.id} encountered an error:`, err.message);
       if (!job) return;
 
       const batchId = job.id.split('_')[1];
       const failedReason = err.message || "Unknown unexpected execution crash exception";
+      const maxAttempts = job.opts.attempts || 1;
 
+      // CRITICAL PROTECTION: Skip state pollution if BullMQ is going to handle a retry attempt
+      if (job.attemptsMade < maxAttempts) {
+            console.log(`[BullMQ] Job ${job.id} marked for automatic retry queue re-assignment.`);
+            return;
+      }
+
+      // Final hard terminal failure branch
       try {
             await markJobFailed(job.id, failedReason);
             await incrementBatchFailed(batchId);
+
+            // Atomically evaluate macro-batch closure status safely 
+            await checkAndCompleteBatch(batchId);
       } catch (dbErr) {
-            console.error(`Database commit failure on job failure hook for ${job.id}:`, dbErr);
+            console.error(`Database update failure on fatal job closure for ${job.id}:`, dbErr);
       }
 });
 

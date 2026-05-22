@@ -64,6 +64,7 @@ CREATE TABLE users (
   role user_role NOT NULL DEFAULT 'user',
   is_verified BOOLEAN NOT NULL DEFAULT FALSE,
   timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
+  storage_used_bytes BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -78,9 +79,9 @@ CREATE TABLE plans (
   name VARCHAR(50) NOT NULL UNIQUE, -- Free / Pro / Business
   is_free BOOLEAN NOT NULL DEFAULT FALSE,
   daily_jobs_limit INTEGER NOT NULL CHECK (daily_jobs_limit >= 0),
-  max_file_size_mb INTEGER NOT NULL CHECK (max_file_size_mb > 0),
+  max_file_size_bytes BIGINT NOT NULL CHECK (max_file_size_bytes > 0),
   priority_level INTEGER NOT NULL CHECK (priority_level >= 1),
-  storage_limit_mb INTEGER NOT NULL CHECK (storage_limit_mb >= 0),
+  storage_limit_bytes BIGINT NOT NULL CHECK (storage_limit_bytes >= 0),
   watermark_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -125,7 +126,7 @@ CREATE TABLE subscriptions (
   expires_at TIMESTAMPTZ,
   auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
   cancelled_at TIMESTAMPTZ,
-  source VARCHAR(30) NOT NULL DEFAULT 'manual',
+  source VARCHAR(30) NOT NULL DEFAULT 'sign_up_auto',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (
@@ -190,7 +191,7 @@ CREATE TABLE image_jobs (
   status job_status NOT NULL DEFAULT 'queued',
   priority INTEGER NOT NULL CHECK (priority >= 1),
   output_url TEXT,
-  output_size_kb INTEGER CHECK (output_size_kb >= 0),
+  output_size_bytes INTEGER CHECK (output_size_bytes >= 0),
   width INTEGER CHECK (width > 0),
   height INTEGER CHECK (height > 0),
   format VARCHAR(20),
@@ -224,11 +225,11 @@ CREATE TABLE usage_logs (
   user_id UUID NOT NULL
     REFERENCES users(id)
     ON DELETE CASCADE,
-  date DATE NOT NULL,
+  date DATE NOT NULL DEFAULT CURRENT_DATE,
   jobs_used INTEGER NOT NULL DEFAULT 0
     CHECK (jobs_used >= 0),
-  storage_used_mb INTEGER NOT NULL DEFAULT 0
-    CHECK (storage_used_mb >= 0),
+  storage_snapshot_bytes INTEGER NOT NULL DEFAULT 0
+    CHECK (storage_snapshot_bytes >= 0),
   api_requests INTEGER NOT NULL DEFAULT 0
     CHECK (api_requests >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

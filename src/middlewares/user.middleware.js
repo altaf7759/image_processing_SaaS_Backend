@@ -1,7 +1,8 @@
+import { User } from '../models/user.models.js';
 import AppError from '../utils/AppError.js';
 import { verifyToken } from '../utils/jwt.js';
 
-export const validateToken = (req, res, next) => {
+export const validateToken = async (req, res, next) => {
       try {
             let token;
 
@@ -17,7 +18,20 @@ export const validateToken = (req, res, next) => {
             }
 
             const decoded = verifyToken(token);
-            req.user = decoded;
+
+            const subscription = await User.findActivePlanByUserId(decoded.id);
+
+            if (!subscription) {
+                  throw new AppError("Subscription not found", 404);
+            }
+
+            req.user = {
+                  id: decoded.id,
+                  email: decoded.email,
+                  role: decoded.role,
+                  subscription,
+            }
+
             next();
       } catch (error) {
             next(error);

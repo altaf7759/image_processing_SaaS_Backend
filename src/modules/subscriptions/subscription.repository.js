@@ -1,36 +1,57 @@
 import pool from '../../config/db.js'
 
-export const createSubscription = async ({ client, user_id, plan_id, plan_price_id, expires_at, auto_renew = false }) => {
+export const createSubscription = async ({
+      client = pool,
+      user_id,
+      plan_id,
+      plan_price_id,
+      expires_at = null,
+      auto_renew = false,
+      source = "manual_upgrade"
+}) => {
+
       const query = `
-                  INSERT INTO subscriptions (
-                        user_id,
-                        plan_id,
-                        plan_price_id,
-                        status,
-                        started_at,
-                        expires_at,
-                        auto_renew,
-                        source
-                  )
-                  VALUES (
-                  $1, $2, $3,
-                  'active',
-                  NOW(),
+            INSERT INTO subscriptions (
+                  user_id,
+                  plan_id,
+                  plan_price_id,
+                  expires_at,
+                  auto_renew,
+                  source
+            )
+            VALUES (
+                  $1,
+                  $2,
+                  $3,
                   $4,
                   $5,
-                  'manual_upgrade'
-                  )
-                  RETURNING
+                  $6
+            )
+            RETURNING
                   id,
                   status,
                   started_at,
                   expires_at,
                   auto_renew,
                   created_at
-            `
-      const result = await client.query(query, [user_id, plan_id, plan_price_id, expires_at, auto_renew])
-      return result
-}
+      `;
+
+      const values = [
+            user_id,
+            plan_id,
+            plan_price_id,
+            expires_at,
+            auto_renew,
+            source
+      ];
+
+      const result = await client.query(
+            query,
+            values
+      );
+
+      return result.rows[0];
+};
 
 export const createBillingTransaction = async ({ client, user_id, plan_id, plan_price_id, price, currency = 'INR' }) => {
       const query = `

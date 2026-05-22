@@ -10,7 +10,7 @@ export const FILE_TYPES = {
 }
 
 export const LIMITS = {
-      MAX_FILE_SIZE_FREE: 5 * 1024 * 1024
+      MAX_FILE_SIZE: 100 * 1024 * 1024
 }
 
 export const MAX_NUMBER_OF_JOBS = 10;
