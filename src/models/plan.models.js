@@ -22,7 +22,7 @@ export const Plan = {
                   FROM plan_prices pp
                   INNER JOIN plans p
                         ON p.id = pp.plan_id
-                  WHERE pp.id = $1
+                  WHERE p.id = $1
                         AND pp.is_active = TRUE
                         AND p.is_active = TRUE
                   LIMIT 1
@@ -35,13 +35,13 @@ export const Plan = {
       getPlanIdAndPlanPriceIdForFreePlan: async () => {
             const query = `
                   SELECT
-                        p.id, AS plan_id
+                        p.id AS plan_id,
                         pp.id AS price_id
                   FROM plans AS p
                   LEFT JOIN plan_prices AS pp
                         ON pp.plan_id = p.id
-                  WHERE p.name = "Free"
-                  AND is_active = TRUE
+                  WHERE p.name = 'Free'
+                  AND p.is_active = TRUE
                   LIMIT 1
             `
             const result = await pool.query(query)

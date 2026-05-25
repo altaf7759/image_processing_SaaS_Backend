@@ -1,11 +1,14 @@
 import pool from "../../config/db.js";
+import { createEmailLog } from "../../models/email.model.js";
 import { Plan } from "../../models/plan.models.js";
 import { Subscription } from "../../models/subscription.model.js";
+import { emailQueue } from "../../queues/email.queue.js";
 import AppError from "../../utils/AppError.js";
 import { createBillingTransaction, createSubscription } from "./subscription.repository.js";
 
-export const processSubscription = async (userId, planPriceId, autoRenew) => {
+export const processSubscription = async (userId, planPriceId, autoRenew, email, userName) => {
       const client = await pool.connect();
+      let emailLog = null;
 
       try {
             await client.query("BEGIN");
@@ -51,9 +54,39 @@ export const processSubscription = async (userId, planPriceId, autoRenew) => {
                   auto_renew: autoRenew
             });
 
-            const subscription = subQuery.rows[0];
+            const subscription = subQuery;
+
+            emailLog = await createEmailLog({
+                  userId,
+                  type: "subscription buy email",
+                  email,
+                  client
+            });
 
             await client.query("COMMIT");
+
+            if (emailLog) {
+                  try {
+                        await emailQueue.add(
+                              "email",
+                              {
+                                    email: emailLog.recipient_email,
+                                    userId: userId,
+                                    type: emailLog.type,
+                                    name: userName,
+                                    emailLogId: emailLog.id
+                              },
+                              {
+                                    attempts: 3,
+                                    backoff: { type: "exponential", delay: 1000 },
+                                    removeOnComplete: { age: 3600, count: 100 },
+                                    removeOnFail: { age: 86400, count: 50 }
+                              }
+                        );
+                  } catch (queueError) {
+                        console.error("Queue system dispatch error:", queueError);
+                  }
+            }
 
             return {
                   success: true,

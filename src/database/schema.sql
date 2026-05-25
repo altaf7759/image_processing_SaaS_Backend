@@ -38,6 +38,7 @@ CREATE TYPE job_status AS ENUM (
 );
 
 CREATE TYPE email_status AS ENUM (
+  'queued'
   'sent',
   'failed'
 );
@@ -246,7 +247,7 @@ CREATE TABLE email_logs (
     ON DELETE SET NULL,
   type VARCHAR(50) NOT NULL,
   recipient_email CITEXT NOT NULL,
-  status email_status NOT NULL DEFAULT 'sent',
+  status email_status NOT NULL DEFAULT 'queued',
   provider_message_id VARCHAR(255),
   sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
