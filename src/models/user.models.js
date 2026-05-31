@@ -7,6 +7,12 @@ export const User = {
             return result.rows[0]
       },
 
+      findById: async (id) => {
+            const query = 'SELECT * FROM users WHERE id = $1;'
+            const result = await pool.query(query, [id])
+            return result.rows[0]
+      },
+
       findActivePlanByUserId: async (
             userId
       ) => {
@@ -18,6 +24,7 @@ export const User = {
                   p.priority_level,
                   p.storage_limit_bytes,
                   p.is_active,
+                  p.id AS plan_id,
 
                   u.storage_used_bytes,
 

@@ -10,6 +10,7 @@ import { planRouter } from "./modules/plans/plan.routes.js";
 import { imageRouter } from "./modules/image/image.routes.js";
 import { GlobalErrorHandler } from "./utils/GlobalError.js";
 import { subscriptionRouter } from "./modules/subscriptions/subscription.routes.js";
+import { profileRouter } from "./modules/profile/profile.routes.js";
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/plans", planRouter);
 app.use("/api/subscriptions", subscriptionRouter);
 app.use("/api/images", imageRouter);
+app.use("/api/profile", profileRouter)
 
 app.use(GlobalErrorHandler)
 

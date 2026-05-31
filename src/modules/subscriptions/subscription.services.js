@@ -13,7 +13,7 @@ export const processSubscription = async (userId, planPriceId, autoRenew, email,
       try {
             await client.query("BEGIN");
 
-            const priceQuery = await Plan.getPlanPrices(client, planPriceId);
+            const priceQuery = await Plan.getPlanPrices(planPriceId, client);
 
             if (priceQuery.length === 0) {
                   throw new AppError("Invalid subscription option selected", 400);
