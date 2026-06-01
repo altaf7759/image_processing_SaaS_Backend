@@ -35,7 +35,8 @@ export const addImageToQueue = async (req) => {
             max_file_size_bytes,
             storage_limit_bytes,
             storage_used_bytes,
-            daily_jobs_limit
+            daily_jobs_limit,
+            priority_level
       } = req.user.subscription;
 
       const todayJobLimit = await findUserJobLimitForToday(userId);
@@ -132,7 +133,7 @@ export const addImageToQueue = async (req) => {
 
                                     type: target,
 
-                                    priority: 1
+                                    priority: Number(priority_level)
                               },
                               client
                         );
