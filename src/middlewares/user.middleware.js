@@ -4,6 +4,11 @@ import { verifyToken } from '../utils/jwt.js';
 
 export const validateToken = async (req, res, next) => {
       try {
+            console.log("================================");
+            console.log(req.method, req.originalUrl);
+            console.log("Cookies:", req.cookies);
+            console.log("Authorization:", req.headers.authorization);
+
             let token;
 
             if (req.cookies && req.cookies.jwt) {
@@ -17,6 +22,7 @@ export const validateToken = async (req, res, next) => {
             console.log("Headers Cookie:", req.headers.cookie);
 
             if (!token) {
+                  console.log("FAILED REQUEST:", req.method, req.originalUrl);
                   throw new AppError('Unauthorized: No token provided', 401);
             }
 
