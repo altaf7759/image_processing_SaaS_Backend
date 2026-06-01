@@ -2,7 +2,7 @@ import { z } from "zod";
 import AppError from "../../utils/AppError.js";
 import { MAX_NUMBER_OF_JOBS } from "../../constants/constants.js";
 
-const SOCIAL_PRESETS = ["youtube_thumbnail", "insta_post", "insta_story", "fb_cover"];
+const SOCIAL_PRESETS = ["youtube_thumbnail", "insta_post", "insta_story", "fb_cover", "twitter"];
 
 export const uploadImageSchema = z.object({
       file: z.object({

@@ -19,6 +19,8 @@ export const SOCIAL_PRESETS = {
       "youtube_thumbnail": { width: 1280, height: 720 },
       "insta_post": { width: 1080, height: 1080 },
       "insta_story": { width: 1080, height: 1920 },
+      "fb_cover": { width: 851, height: 315 },
+      "twitter": { width: 1200, height: 675 },
 };
 
 export const JOB_STATUS = {

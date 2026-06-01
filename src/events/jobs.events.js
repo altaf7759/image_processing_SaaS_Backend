@@ -54,21 +54,27 @@ export const streamBatchProgress = async (req, res) => {
       }
       // ─────────────────────────────────────────────────────────────────────
 
+      // Helper function to extract correct target variant strings safely
+      const getTargetFromJobId = (jobId) => {
+            const parts = jobId.split('_');
+            return parts.slice(2, -1).join('_');
+      };
+
       const onProgress = ({ jobId, data: progressValue }) => {
             if (!jobId.includes(`job_${batchId}`)) return;
-            const target = jobId.split('_')[2];
+            const target = getTargetFromJobId(jobId);
 
             sendSSE('job_update', {
                   target,
                   status: 'processing',
                   progress: progressValue,
-                  message: `Processing dimensions for ${target}...`
+                  message: `Processing dimensions for ${target.replace('_', ' ')}...`
             });
       };
 
       const onActive = async ({ jobId }) => {
             if (!jobId.includes(`job_${batchId}`)) return;
-            const target = jobId.split('_')[2];
+            const target = getTargetFromJobId(jobId);
 
             try {
                   const job = await imageQueue.getJob(jobId);
@@ -87,7 +93,7 @@ export const streamBatchProgress = async (req, res) => {
 
       const onCompleted = async ({ jobId, returnvalue }) => {
             if (!jobId.includes(`job_${batchId}`)) return;
-            const target = jobId.split('_')[2];
+            const target = getTargetFromJobId(jobId);
 
             try {
                   const parsedResult = typeof returnvalue === 'string' ? JSON.parse(returnvalue) : returnvalue;
@@ -115,7 +121,7 @@ export const streamBatchProgress = async (req, res) => {
 
       const onFailed = async ({ jobId, failedReason }) => {
             if (!jobId.includes(`job_${batchId}`)) return;
-            const target = jobId.split('_')[2];
+            const target = getTargetFromJobId(jobId);
 
             sendSSE('job_update', {
                   target,
