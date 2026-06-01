@@ -38,7 +38,7 @@ CREATE TYPE job_status AS ENUM (
 );
 
 CREATE TYPE email_status AS ENUM (
-  'queued'
+  'queued',
   'sent',
   'failed'
 );
