@@ -13,7 +13,8 @@ import AppError from "../../utils/AppError.js";
 import {
       createImageBatch,
       createJobRow,
-      increaseStorageUsed
+      increaseStorageUsed,
+      findUserJobLimitForToday
 } from "./image.repository.js";
 
 export const addImageToQueue = async (req) => {
@@ -34,7 +35,19 @@ export const addImageToQueue = async (req) => {
             max_file_size_bytes,
             storage_limit_bytes,
             storage_used_bytes,
+            daily_jobs_limit
       } = req.user.subscription;
+
+      const todayJobLimit = await findUserJobLimitForToday(userId);
+
+      if (todayJobLimit >= Number(daily_jobs_limit)) {
+            await deleteR2Object(r2Key);
+
+            throw new AppError(
+                  "Daily job limit exceeded",
+                  403
+            );
+      }
 
       if (
             Number(req.file.size) >
@@ -52,7 +65,6 @@ export const addImageToQueue = async (req) => {
       const projectedStorage =
             Number(storage_used_bytes) +
             Number(req.file.size);
-      console.log(projectedStorage, storage_limit_bytes)
 
       if (
             Number(projectedStorage) >

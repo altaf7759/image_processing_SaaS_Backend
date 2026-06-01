@@ -121,3 +121,19 @@ export const increaseStorageUsed = async (
    const result = await client.query(query, values);
    return result.rows[0].storage_used_bytes;
 }
+
+export const findUserJobLimitForToday = async (
+   userId,
+   client = pool
+) => {
+
+   const query = `
+      SELECT jobs_used AS jobs_today
+      FROM usage_logs
+      WHERE user_id = $1
+      AND date = CURRENT_DATE
+   `;
+
+   const result = await client.query(query, [userId]);
+   return Number(result.rows[0].jobs_today);
+}

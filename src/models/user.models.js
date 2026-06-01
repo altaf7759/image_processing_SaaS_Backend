@@ -24,6 +24,7 @@ export const User = {
                   p.priority_level,
                   p.storage_limit_bytes,
                   p.is_active,
+                  p.daily_jobs_limit,
                   p.id AS plan_id,
 
                   u.storage_used_bytes,
