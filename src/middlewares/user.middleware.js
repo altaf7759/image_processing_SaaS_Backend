@@ -13,6 +13,9 @@ export const validateToken = async (req, res, next) => {
                   token = req.headers.authorization.split(" ")[1];
             }
 
+            console.log("Cookies:", req.cookies);
+            console.log("Headers Cookie:", req.headers.cookie);
+
             if (!token) {
                   throw new AppError('Unauthorized: No token provided', 401);
             }
