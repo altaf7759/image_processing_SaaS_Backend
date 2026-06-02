@@ -135,5 +135,5 @@ export const findUserJobLimitForToday = async (
    `;
 
    const result = await client.query(query, [userId]);
-   return Number(result.rows[0].jobs_today);
+   return Number(result.rows[0]?.jobs_today || 0);
 }
